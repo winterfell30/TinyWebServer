@@ -15,3 +15,7 @@ make
 telnet localhost port   
 (2).    
 直接在浏览器中使用localhost:port访问服务器   
+
+正在做的功能：  
+post请求  
+并发  

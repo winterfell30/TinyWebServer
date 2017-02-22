@@ -103,7 +103,7 @@ void clienterror(int fd, char *cause, char *errnum,
     sprintf(body, "%s<body bgcolor=""ffffff"">\r\n", body);
     sprintf(body, "%s%s: %s\r\n", body, errnum, shortmsg);
     sprintf(body, "%s<p>%s: %s\r\n", body, longmsg, cause);
-    sprintf(body, "%s<hr><em>The Web server</em>\r\n", body);
+    sprintf(body, "%s<hr><em>Tiny Web server</em>\r\n", body);
 
     //输出错误页面
     sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
@@ -157,7 +157,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
             strcpy(cgiargs, "");
         }
         strcpy(filename, ".");
-        strcpy(filename, uri);
+        strcat(filename, uri);
         return 0;
     }
 }
