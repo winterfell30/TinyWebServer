@@ -6,18 +6,12 @@
 
 使用方法：  
 1.  
-```
-make
-```  
+make  
 2.  
-```  
-./main port
-```
+./main port  
 3.  
 (1).  
-在终端中使用telnet访问服务器  
-```
-telnet localhost port
-```  
-(2).   
-直接在浏览器中使用localhost:port访问服务器  
+在终端中使用telnet访问服务器   
+telnet localhost port   
+(2).    
+直接在浏览器中使用localhost:port访问服务器   
