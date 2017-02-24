@@ -1,13 +1,18 @@
 #include "helper.h"
 
+#define M_GET 1
+#define M_POST 2
+#define M_HEAD 3
+#define M_NONE 0
+
 void doit(int fd);
-void read_requesthdrs(rio_t *rp);
+void read_requesthdrs(rio_t *rp, char *post_content, int mtd);
 int parse_uri(char *uri, char *filename, char *cgiargs);
-void serve_static(int fd, char *filename, int filetype);
+void serve_static(int fd, char *filename, int filetype, int mtd);
 void get_filetype(char *filename, char *filetype);
-void serve_dynamic(int fd, char *filename, char *cgiargs);
+void serve_dynamic(int fd, char *filename, char *cgiargs, int mtd);
 void clienterror(int fd, char *cause, char *errnum,
-        char *shortmsg, char *longmsg);
+        char *shortmsg, char *longmsg, int mtd);
 
 
 int main(int argc, char **argv)
@@ -39,12 +44,16 @@ int main(int argc, char **argv)
 }
 
 //处理http事务
+//支持GET POST HEAD
 void doit(int fd)
 {
-    int is_static;
+    int is_static, mtd;
     struct stat sbuf;
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char filename[MAXLINE], cgiargs[MAXLINE];
+    
+    char post_content[MAXLINE];
+
     rio_t rio;
 
     //读取请求和header
@@ -53,48 +62,61 @@ void doit(int fd)
         return;
     printf("%s", buf);
     sscanf(buf, "%s %s %s", method, uri, version);
-    if (strcasecmp(method, "GET"))
+
+    if (!strcmp(method, "GET")) mtd = M_GET;
+    else if (!strcmp(method, "POST")) mtd = M_POST;
+    else if (!strcmp(method, "HEAD")) mtd = M_HEAD;
+    else mtd = M_NONE;
+    
+    if (mtd == M_NONE)
     {
         clienterror(fd, method, "501", "Not Implemented",
-                "Tiny does not implement this method");
+                "Tiny does not implement this method", mtd);
         return;
     }
-    read_requesthdrs(&rio);
+    read_requesthdrs(&rio, post_content, mtd);
 
-    //解析GET请求
+    //解析请求
     is_static = parse_uri(uri, filename, cgiargs);
     if (stat(filename, &sbuf) < 0)
     {
         clienterror(fd, filename, "404", "Not found",
-                "Tiny coundn't find this file");
+                "Tiny coundn't find this file", mtd);
         return;
     }
 
     if (is_static)
     {
+        if (mtd == M_POST)
+        {
+            clienterror(fd, filename, "405", "Method Not Allowed",
+                    "Request method POST is not allowed for the url", mtd);
+            return;
+        }
         if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode))
         {
             clienterror(fd, filename, "403", "Forbidden",
-                    "Tiny couldn't read the file");
+                    "Tiny couldn't read the file", mtd);
             return;
         }
-        serve_static(fd, filename, sbuf.st_size);
+        serve_static(fd, filename, sbuf.st_size, mtd);
     }
     else
     {
         if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode))
         {
             clienterror(fd, filename, "403", "Forbidden",
-                    "Tiny couldn't run the GET program");
+                    "Tiny couldn't run the GET program", mtd);
             return;
         }
-        serve_dynamic(fd, filename, cgiargs);
+        if (mtd == M_POST) strcpy(cgiargs, post_content);
+        serve_dynamic(fd, filename, cgiargs, mtd);
     }
 }
 
 //将错误信息返回给客户端
 void clienterror(int fd, char *cause, char *errnum,
-        char *shortmsg, char *longmsg)
+        char *shortmsg, char *longmsg, int mtd)
 {
     char buf[MAXLINE], body[MAXBUF];
 
@@ -111,20 +133,36 @@ void clienterror(int fd, char *cause, char *errnum,
     sprintf(buf, "Content-type: text/html\r\n");
     Rio_writen(fd, buf, strlen(buf));
     sprintf(buf, "Content-length: %d\r\n\r\n", (int)strlen(body));
-    Rio_writen(fd, buf, strlen(buf));
-    Rio_writen(fd, body, strlen(body));
+    if (mtd != M_HEAD)
+    {
+        Rio_writen(fd, buf, strlen(buf));
+        Rio_writen(fd, body, strlen(body));
+    }
 }
 
-//tiny中忽略报头
-void read_requesthdrs(rio_t *rp)
+//get则忽略报文post读取
+void read_requesthdrs(rio_t *rp, char *post_content, int mtd)
 {
     char buf[MAXLINE];
+    int contentlen = 0;
 
     Rio_readlineb(rp, buf, MAXLINE);
+    if (mtd == M_POST && strstr(buf, "Content-Length: ") == buf)
+        contentlen = atoi(buf + strlen("Content-Length: "));
     while (strcmp(buf, "\r\n"))
     {
         Rio_readlineb(rp, buf, MAXLINE);
-        printf("%s", buf);
+        printf("233 %s", buf);
+
+        //取得post的参数长度
+        if (mtd == M_POST && strstr(buf, "Content-Length: ") == buf)
+            contentlen = atoi(buf + strlen("Content-Length: "));
+    }
+    if (mtd == M_POST)
+    {
+        contentlen = Rio_readnb(rp, post_content, contentlen);
+        post_content[contentlen] = '\0';
+        printf("POST_CONTENT: %s\n", post_content);
     }
     return;
 }
@@ -164,7 +202,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
 
 //静态服务
 //可以使用HTML、纯文本文件、GIF、JPG格式到文件
-void serve_static(int fd, char *filename, int filesize)
+void serve_static(int fd, char *filename, int filesize, int mtd)
 {
     int srcfd;
     char *srcp, filetype[MAXLINE], buf[MAXLINE];
@@ -176,6 +214,8 @@ void serve_static(int fd, char *filename, int filesize)
     sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
     sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
     Rio_writen(fd, buf, strlen(buf));
+
+    if (mtd == M_HEAD) return;
 
     //给客户端发送响应报文
     srcfd = Open(filename, O_RDONLY, 0);
@@ -198,7 +238,7 @@ void get_filetype(char *filename, char *filetype)
         strcpy(filetype, "text/plain");
 }
 
-void serve_dynamic(int fd, char *filename, char *cgiargs)
+void serve_dynamic(int fd, char *filename, char *cgiargs, int mtd)
 {
     char buf[MAXLINE], *emptylist[] = {NULL};
 
@@ -207,6 +247,8 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
     Rio_writen(fd, buf, strlen(buf));
     sprintf(buf, "Server: Tiny Web Server\r\n");
     Rio_writen(fd, buf, strlen(buf));
+
+    if (mtd == M_HEAD) return;
 
     if (Fork() == 0)
     {
