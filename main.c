@@ -1,9 +1,15 @@
 #include "helper.h"
+#include "sbuf.h"
 
 #define M_GET 1
 #define M_POST 2
 #define M_HEAD 3
 #define M_NONE 0
+
+const int MAXThreads = 4;
+const int buffersize = 1000;
+
+sbuf_t sbuf;
 
 void doit(int fd);
 void read_requesthdrs(rio_t *rp, char *post_content, int mtd);
@@ -13,6 +19,7 @@ void get_filetype(char *filename, char *filetype);
 void serve_dynamic(int fd, char *filename, char *cgiargs, int mtd);
 void clienterror(int fd, char *cause, char *errnum,
         char *shortmsg, char *longmsg, int mtd);
+void *thread(void *vargp);
 
 
 int main(int argc, char **argv)
@@ -21,6 +28,7 @@ int main(int argc, char **argv)
     char hostname[MAXLINE], port[MAXLINE];
     socklen_t clientlen;
     struct sockaddr_in clientaddr;
+    pthread_t tid;
 
     //检查输入合法性
     if (argc != 2)
@@ -30,6 +38,11 @@ int main(int argc, char **argv)
     }
 
     listenfd = Open_listenfd(argv[1]);
+    sbuf_init(&sbuf, buffersize);          //初始化buf
+
+    for (int i = 0; i < MAXThreads; i++)
+        Pthread_create(&tid, NULL, thread, NULL);
+
     while (1)
     {
         clientlen = sizeof(port);
@@ -37,10 +50,22 @@ int main(int argc, char **argv)
         Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE,
                 port, MAXLINE, 0);
         printf("Accepted connection from (%s, %s)\n", hostname, port);
-        doit(connfd);
-        Close(connfd);
+        sbuf_insert(&sbuf, connfd);        //将描述符插入buffer
     }
+    sbuf_deinit(&sbuf);                    //释放buf
     return 0;
+}
+
+void *thread(void *vargp)
+{
+    Pthread_detach(pthread_self());        //分离当前线程
+    while (1)
+    {
+        int connfd = sbuf_remove(&sbuf);   //从buffer中取描述符
+        doit(connfd);
+        Close(connfd);                     //关闭描述符连接
+    }
+    return NULL;
 }
 
 //处理http事务

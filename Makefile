@@ -6,11 +6,14 @@ LIB = -lpthread
 
 all: main cgi
 
-main: main.c helper.o
-	$(CC) $(CFLAGS) -o main main.c helper.o $(LIB)
+main: main.c helper.o sbuf.o
+	$(CC) $(CFLAGS) -o main main.c helper.o sbuf.o $(LIB)
 
 helper.o: helper.c
 	$(CC) $(CFLAGS) -c helper.c
+
+sbuf.o: sbuf.c
+	$(CC) $(CFLAGS) -c sbuf.c
 
 cgi:
 	(cd cgi-bin; make)
